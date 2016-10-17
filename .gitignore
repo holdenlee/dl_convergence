@@ -1,0 +1,35 @@
+# Complied source #
+###################
+
+*.exe
+*.hi
+*.o
+
+# LaTeX auxiliary files #
+#########################
+
+*.aux
+*.idx
+*.ilg
+*.ind
+*.log
+*.nlo
+*.nls
+*.out
+*.ptc
+*.ptx
+*.gz
+
+# Miscellaneous files #
+#######################
+
+*.db
+*~
+*#
+Test.ipynb
+
+# Folders #
+###########
+
+elm-stuff
+.ipynb_checkpoints
