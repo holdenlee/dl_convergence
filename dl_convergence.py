@@ -8,78 +8,12 @@ import time
 
 import numpy as np
 from six.moves import xrange  # pylint: disable=redefined-builtin
-import tensorflow as tf
 import math
 
-from nets import *
+#from nets import *
 from random import * 
 
 placeholder_dict = {}
-
-"""
-s = 10
-m = 1000 # hidden vector
-n = 500 # observed vector
-q = s/m
-"""
-
-s = 3
-m = 50 # hidden vector
-n = 25 # observed vector
-q = s/m
-
-""" Norms """
-#x :: R^{batch * size}
-def l2(x, reduction_indices=[1]): 
-    return tf.reduce_sum(tf.square(x), reduction_indices=reduction_indices)
-#note this is squared.
-
-#h :: R^{batch * size}
-def l1(h, reduction_indices=[1]):
-    return tf.reduce_sum(tf.abs(h), reduction_indices=reduction_indices)
-
-"""
-Classical DL, Lee and Seung
-"""
-def dl_loss(x, A, h):
-    x_t = tf.matmul(h,A)
-    loss = tf.reduce_sum(l2(x - x_t))
-    return loss
-
-# Classic DL, Lee & Seung. Do AM with this. 
-def _dl_fs(x, A, h, la):
-    loss = dl_loss(x,A,h) + la*l1(h, [0,1])
-    #tf.get_collection('A')
-    #tf.add_to_collection('A', A)
-    #tf.get_collection('h')
-    #tf.add_to_collection('h', h)
-    return {"loss":loss}
-
-def dl_fs(A, la, batch_size):
-    global placeholder_dict
-    h = variable_on_cpu("h", shape=(batch_size,m), initializer = tf.truncated_normal_initializer(stddev=1/math.sqrt(m)*s/m))
-    x = variable_on_cpu("x", shape=(batch_size,n), var_type="placeholder")
-    placeholder_dict["x"] = x
-    return _dl_fs(x, A, h, la)
-
-"""
-[AGMM15] DL using thresholding 
-"""
-def th_dl_loss(x, A, th):
-    #print(tf.shape(x))
-    #print(tf.shape(A))
-    h = tf.matmul(x, tf.transpose(A))
-    #    h0 = tf.mul(tf.to_float(tf.less(th * tf.ones_like(h), tf.abs(h))), h)
-    h0 = is_gtr(h, th)*h + is_less(h, -th)*h
-    x_t = tf.matmul(h0,A)
-    loss = tf.reduce_mean(l2(x - x_t, [1]))
-    return loss
-
-def th_dl_fs(A, th, batch_size):
-    x = variable_on_cpu("x", shape=(batch_size,n), var_type="placeholder")
-    placeholder_dict["x"] = x
-    loss = th_dl_loss(x, A, th)
-    return {"loss": loss, "accuracy": loss}
 
 """
 Sample generation
@@ -91,6 +25,7 @@ def rand_pm1():
         return 1
 
 def make_data_set(A,size,m,q,f):
+    n = np.shape(A)[1]
     hs = np.zeros((size,m))
     for i in range(size):
         for j in range(n):
@@ -102,190 +37,118 @@ def make_data_set(A,size,m,q,f):
 def make_data_set_pm1(A, size,m,q):
     return make_data_set(A,size,m,q,rand_pm1)
 
-def refresh_f(A,m,q,bf):
-    #(xs, ys) 
-    xs = make_data_set_pm1(A,bf.num_examples,m,q)
-    bf.xs = xs
-    #bf.ys = ys
+def get_batch(A,m,q, num_examples):
+    return make_data_set_pm1(A,num_examples,m,q)
 
 def init_close(A, sigma):
     dims = np.shape(A)
     R= 1/math.sqrt(dims[1]) * sigma * np.random.randn(*dims)
     return (A + R).astype(np.float32)
 
-"""
-AM step
-"""
-def am_step(fs, global_step):
-    def _am_step(gs):
-        tf.train.GradientDescentOptimizer(alpha).minimize(
-    train_step(fs["loss"], fs["losses"], global_step, 
-                             lambda gs: tf.train.GradientDescentOptimizer(alpha)))
+def am_step(xs, A, eta, th, verbosity=0):
+    #decoding
+    hs = [[x if x>th or x<-th else 0 for x in li] for li in np.dot(xs,np.transpose(A))]
+#map(lambda x: x if x>th or x<-th else 0, np.dot(xs,np.transpose(A)))
+    diff = (np.dot(hs, A) - xs)
+    grad = np.dot( np.transpose(hs), diff)/np.shape(xs)[0]
+    #print(np.shape(A))
+    #print(np.shape(grad))
+    #print(grad)
+    #print("am_step")
+    #print(hs[0], diff[0], eta, grad[0])
+    A = A - eta * grad
+    if verbosity==1:
+        loss = np.mean(np.sum(np.square(diff), 1))
+        #np.sum(np.square(diff))
+        print("Loss: %f" % loss)
+    return A
 
-def main(argv=None):
-    np.set_printoptions(threshold=np.inf)
-    am_dl()
+def eval_step(xs, A, th):
+    hs = [[x if x>th or x<-th else 0 for x in li] for li in np.dot(xs,np.transpose(A))]
+#map(lambda x: x if x>th or x<-th else 0, np.dot(xs,np.transpose(A)))
+    diff = xs - np.dot(hs, A)
+    loss = np.mean(np.sum(np.square(diff), 1))
+    print("Eval loss: %f" % loss)
+
+def train_dl(A, B, m, q,batch_size, steps, eta, th, eval_steps):
+    xs = get_batch(A, m, q, batch_size)
+    eval_step(xs, B, th)
+    for i in range(1,steps+1):
+        xs = get_batch(A, m, q, batch_size)
+        B = am_step(xs, B, eta, th, 1 if i % eval_steps == 0 else 0)
+        #print(B[0])
+        if i % eval_steps == 0:
+            xs = get_batch(A, m, q, batch_size)
+            eval_step(xs, B, th)
+    return B
 
 def am_dl():
-    f = open('am_dl.txt', 'w')
+    f = open('am_dl_3_50_25.txt', 'w')
+    s = 3
+    m = 50 # hidden vector
+    n = 25 # observed vector
+    q = s/m
     print(s,m,n,q)
-    #batch_size = 32
-    #train_size = 2**15
-#    sigma = 0.05
-    max_steps = 10000
-    eval_steps = 10000      
-    la = 0.01
+    max_steps = 1000
+    eval_steps = 100      
     alpha_list = [1e-2] #[1e-4, 1e-3, 1e-2]
-    #batch_list = [16, 32]
-    #train_list = [2**10, 2**15]
-    batch_size = 1024 #32
-    train_size = 2**10 #actually, number of examples
-    test_size = 2**10
+    batch_size = 256 # \Om(m * s)
+    th = 0.5
+    eta = 0.1 # 0.1 * m/s
+    A = 1/math.sqrt(n) * np.random.randn(m,n)
+    A = [ai/np.linalg.norm(ai) for ai in A]
+    print("A:")
+    print(A)
+    print("AA^T:")
+    print(np.dot(A,np.transpose(A)))
     #[(lambda M: init_close(M,0), "0")]:
-    for (init,st) in [(lambda M: init_close(M, 0.05), "0.05"),
-                      (lambda M: init_close(M, 0.1), "0.1"),
-                      (lambda M: init_close(M, 0.2), "0.2"),
-                      (lambda M: init_close(M, 0.5), "0.5"),
-                      (lambda M: 1/math.sqrt(n)*np.random.randn(m,n).astype(np.float32), "random"), 
-                      (lambda M: make_data_set_pm1(A,m,m,q), "samples"),
-                      (lambda M: make_data_set_pm1(A,2*m,m,q), "oversamples")]:
-      for alpha in alpha_list:
-        A = 1/math.sqrt(n) * np.random.randn(m,n)
-        A = [ai/np.linalg.norm(ai) for ai in A]
-#np.transpose([ai/np.linalg.norm(ai) for ai in np.transpose(A)])
-        print(A)
-        print(train_size, batch_size, max_steps, eval_steps, alpha, st)
-        f.write(str((train_size, batch_size, max_steps, eval_steps, alpha, st)))
-        f.write("\n")
-        train_dir = "data/"
-#        (xs,hs) = make_data_set_pm1(A,train_size,m,q)
-        #              train_data = make_batch_feeder(xs, ys)
-        train_data = make_batch_feeder_with_refresh(None, None, lambda bf: refresh_f(A, m,q,bf), train_size)
-        test_data = make_batch_feeder_with_refresh(None, None, lambda bf: refresh_f(A, m,q,bf), test_size)
-        with tf.Graph().as_default():
-            with tf.variable_scope("def"):
-                #, shape=(m,n) #do this for tensorflow 7 not 11.
-                A0 = variable_on_cpu("A", initializer=init(A), dtype=tf.float32)
-                      # x = tf.constant(xs)
-                funcs = th_dl_fs(A0, la, batch_size)
-            step = lambda fs, global_step: (
-                train_step(fs["loss"], [], global_step,
-                              lambda gs: tf.train.GradientDescentOptimizer(alpha)))
-            sess=train2(funcs, 
-                        step, 
-                        max_steps=max_steps, 
-                        eval_steps=0, #no evaluation
-                        train_dir=train_dir,
-                        batch_size=batch_size, #no batches
-                        train_data=train_data,
-                        test_data=test_data,
-                        x_pl="def/x:0")
-                        #fn = lambda sess: printAB(A, sess) )
-#                        train_feed={"def/x:0": xs}) 
-                  #  print(tf.get_collection(tf.GraphKeys.VARIABLES))
-                  #  with tf.Graph().as_default():
-            B = tf.get_default_graph().get_tensor_by_name("def/A:0").eval(session=sess)  
-            #Bt = np.transpose(B)
-            (mins, argmins, closestRows) = getClosestRows(A,B)
+    for (init,st) in [(init_close(A, 0.05), "0.05"),
+                      (init_close(A, 0.1), "0.1"),
+                      (init_close(A, 0.2), "0.2"),
+                      (init_close(A, 0.5), "0.5"),
+                      (1/math.sqrt(n)*np.random.randn(m,n).astype(np.float32), "random"), 
+                      (make_data_set_pm1(A,m,m,q), "samples"),
+                      (make_data_set_pm1(A,2*m,m,q), "oversamples")]:
+        for alpha in alpha_list:
+
+            print(batch_size, max_steps, eta, st)
+            f.write(str((batch_size, max_steps, eta, st)))
+            f.write("\n")
+
+            A0 = init
+            B = train_dl(A, A0, m, q, batch_size, max_steps, eta, th, eval_steps)
+            print("A:")
             print(A)
+            print("B:")
             print(B)
+            
+            (mins, argmins, closestRows) = getClosestRows(A,B)
+            print("Distance from rows of A:")
             print(mins)
+            f.write("Distance from rows of A:\n")
             f.write(str(mins))
             f.write("\n")
+            
             Bn = [bi/np.linalg.norm(bi) for bi in B]
-            # np.transpose([bi/np.linalg.norm(bi) for bi in np.transpose(B)])
 
             (mins, argmins, closestRows) = getClosestRows(A,Bn)
+            print("Distance from rows of A (after normalization):")
             print(mins)
+            f.write("Distance from rows of A (after normalization):\n")
             f.write(str(mins))
             f.write("\n")
-            #(mins, argmins, closestRows) = getClosestRows(Bn,A)
-            #f .write(str(mins))
-            #f.write("\n")
-            #  print(A.eval())
-            #  type(A.eval())
+
+            (mins, argmins, closestRows) = getClosestRows(Bn, A)
+            print("Distance from rows of B (after normalization):")
+            print(mins)
+            f.write("Distance from rows of B (after normalization):\n")
+            f.write(str(mins))
+            f.write("\n")
+            
             AB = np.dot(A,np.transpose(B))
-            print(np.shape(A))
-            print(np.shape(B))
-            print(np.shape(AB))
+            print("AB^T")
             print(AB)
-#            ABt = np.less(0.5, np.dot
-#            print(np.transpose(A)*A)
-            print(np.dot(A,np.transpose(A)))
     f.close()
-
-def printAB(A, sess):
-     B = tf.get_default_graph().get_tensor_by_name("def/A:0").eval(session=sess)  
-     #Bt = np.transpose(B)
-     (mins, argmins, closestRows) = getClosestRows(A,B)
-     print(A[0])
-     print(B[0])
-     print(mins)
-     Bn = [bi/np.linalg.norm(bi) for bi in B]
-     # np.transpose([bi/np.linalg.norm(bi) for bi in np.transpose(B)])
-     (mins, argmins, closestRows) = getClosestRows(A,Bn)
-     print(mins)
-     AB = np.dot(A,np.transpose(B))
-     #print(AB)
-     #            ABt = np.less(0.5, np.dot
-     #            print(np.transpose(A)*A)
-     #print(np.dot(A,np.transpose(A)))
-    
-
-def ls_dl():
-    print(s,m,n,q)
-    #batch_size = 32
-    #train_size = 2**15
-    ep = 0.05
-    max_steps = 10000
-    eval_steps = 10000      
-    #test_size = 1024
-    la = 0.01
-    alpha_list = [1e-4, 1e-3, 1e-2]
-    #batch_list = [16, 32]
-    #train_list = [2**10, 2**15]
-    train_size = 1000 #actually, number of examples
-    for alpha in alpha_list:
-#      for batch_size in [16, 32]:
-#          for train_size in [2**10, 2**15]:
-              # initialize A randomly
-              A = 1/math.sqrt(m) * np.random.randn(m,n)
-              #normalize!
-              A = np.transpose([ai/np.linalg.norm(ai) for ai in np.transpose(A)])
-              print(A)
-              print(train_size, max_steps, eval_steps, alpha)
-              train_dir = "data/"
-              (xs,hs) = make_data_set_pm1(A,train_size)
-#              train_data = make_batch_feeder(xs, ys)
-              #  train_data = make_batch_feeder_with_refresh(None, None, lambda bf: refresh_f(A, bf), train_size)
-#              test_data = make_batch_feeder_with_refresh(None, None, lambda bf: refresh_f(A, bf), test_size)
-              with tf.Graph().as_default():
-                  with tf.variable_scope("def"):
-                      A0 = variable_on_cpu("A", shape=(m,n), initializer=init_close(A, sigma))
-#initializer= tf.truncated_normal_initializer(stddev=1/math.sqrt(m)))
-                      # x = tf.constant(xs)
-                      funcs = dl_fs(A0, la, train_size)
-                  step = lambda fs, global_step: (
-                      am_train_step(fs["loss"], [], global_step,
-                                    lambda gs: tf.train.GradientDescentOptimizer(alpha), [reuse_var("def","A")], [reuse_var("def","h")]))
-                  sess=train2(funcs, 
-                             step, 
-                             max_steps=max_steps, 
-                             eval_steps=0, #no evaluation
-                             train_dir=train_dir,
-                             batch_size=0, #no batches
-                             train_feed={"def/x:0": xs}) 
-                  #  print(tf.get_collection(tf.GraphKeys.VARIABLES))
-                  #  with tf.Graph().as_default():
-                  B = tf.get_default_graph().get_tensor_by_name("def/A:0").eval(session=sess)  
-                  #Bt = np.transpose(B)
-                  (mins, argmins, closestRows) = getClosestRows(A,B)
-                  print(mins)
-                  Bn = np.transpose([bi/np.linalg.norm(bi) for bi in np.transpose(B)])
-                  (mins, argmins, closestRows) = getClosestRows(A,Bn)
-                  print(mins)
-                  #  print(A.eval())
-                  #  type(A.eval())
 
 """
 Is learned dictionary close to real dictionary?
@@ -298,6 +161,6 @@ def getClosestRows(A,B):
     closestRows = [B[i] for i in argmins]
     return (mins, argmins, closestRows)  
 
-if __name__ == '__main__':
-  #tf.get_variable_scope().reuse_variables()
-  tf.app.run()
+if __name__=="__main__":
+    np.set_printoptions(threshold=np.inf)
+    am_dl()
