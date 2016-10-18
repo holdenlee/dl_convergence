@@ -261,7 +261,7 @@ def get_train_op(deps):
 def valid_pos_int(n):
     return n!=None and n>0
 
-def train2(funcs, step_f, output_steps=10, summary_steps=100, save_steps=1000, eval_steps = 1000, max_steps=1000000, train_dir="/", log_device_placement=False, batch_size=128,train_data=None,validation_data=None, test_data=None, train_feed={}, eval_feed={}, x_pl=None, y_pl=None, batch_feeder_args=[]):
+def train2(funcs, step_f, output_steps=10, summary_steps=100, save_steps=1000, eval_steps = 1000, max_steps=1000000, train_dir="/", log_device_placement=False, batch_size=128,train_data=None,validation_data=None, test_data=None, train_feed={}, eval_feed={}, x_pl=None, y_pl=None, batch_feeder_args=[], fn=None):
     global_step = tf.Variable(0, trainable=False)
     loss = funcs["loss"]
     # Build a Graph that trains the model with one batch of examples and
@@ -324,6 +324,8 @@ def train2(funcs, step_f, output_steps=10, summary_steps=100, save_steps=1000, e
                         y_pl,
                         batch_feeder_args,
                         eval_feed)
+      if fn != None:
+        fn(sess)
 #    li = tf.get_collection(tf.GraphKeys.VARIABLES)
 #    for i in li:
 #        print(i.name)
@@ -584,13 +586,17 @@ def batch_feeder_f(bf, batch_size):
       perm = np.arange(bf.num_examples)
       np.random.shuffle(perm)
       bf.xs = bf.xs[perm]
-      bf.ys = bf.ys[perm]
+      if bf.ys != None:
+          bf.ys = bf.ys[perm]
       # Start next epoch
       start = 0
       bf.index = batch_size
       assert batch_size <= bf.num_examples
     end = bf.index
-    return bf.xs[start:end], bf.ys[start:end]
+    if bf.ys!=None:
+        return bf.xs[start:end], bf.ys[start:end]
+    else:
+        return bf.xs[start:end]
 
 def batch_feeder_f_with_refresh(bf, batch_size, refresh_f):
     if bf.xs == None:
@@ -608,7 +614,10 @@ def batch_feeder_f_with_refresh(bf, batch_size, refresh_f):
       bf.index = batch_size
       assert batch_size <= bf.num_examples
     end = bf.index
-    return bf.xs[start:end], bf.ys[start:end]
+    if bf.ys!=None:
+        return bf.xs[start:end], bf.ys[start:end]
+    else:
+        return bf.xs[start:end]
 
 def make_batch_feeder(xs, ys):
     return BatchFeeder(xs, ys, len(xs), batch_feeder_f)
@@ -663,3 +672,9 @@ def output_info(batch_size, step, loss_value, duration):
                   'sec/batch)')
     print (format_str % (datetime.now(), step, loss_value,
                          examples_per_sec, sec_per_batch))
+
+def is_gtr(x, c):
+    return (tf.sign(x-c) + 1)/2
+
+def is_less(x,c):
+    return (1-tf.sign(x-c))/2
