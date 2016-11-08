@@ -27,6 +27,9 @@
 *~
 *#
 Test.ipynb
+*.png
+*.pickle
+am_dls_data.txt
 
 # Folders #
 ###########

@@ -1,4 +1,5 @@
 from random import *
+import math
 
 """
 List functions
@@ -27,15 +28,42 @@ def breakUpIntoSegments(li, length):
         li2.append(li[i:i+length])
     return li2
 
-def sample_without_replacement(n, k):
-    li = []
-    i = 0
-    for i in range(k):
-        r = randrange(0,n)
-        while r in li:
+def sample_without_replacement(n, k, method="take"):
+    if method=="take":
+        li = []
+        i = 0
+        for i in range(k):
             r = randrange(0,n)
-        li.append(r)
-    return li
+            while r in li:
+                r = randrange(0,n)
+            li.append(r)
+        return li
+    else:
+        li = []
+        chosen = 0
+        for i in range(n):
+            r = random()
+            if r < float(k-chosen)/(n-i):
+                li.append(i)
+                chosen = chosen + 1
+            if chosen == k:
+                break
+        return li
+
+def get_frac(li, i):
+    j = math.floor(i)
+    if i==j:
+        return li[j]
+    else:
+        return (1-(i-j)) * li[j] + (i-j) * li[j+1]
+
+def percentiles(li, ps):
+    lis = sorted(li)
+    l = len(li)
+    return [get_frac(lis, i*(l-1)) for i in ps]
+
+def quartiles(li):
+    return percentiles(li, [0,.25, .5, .75, 1])
 
 """
 Loops

@@ -13,6 +13,9 @@ import math
 
 from nets import *
 from random import * 
+import dl_feed
+from load_mnist import *
+import spams
 
 # Apply different types of DL to images
 
@@ -121,6 +124,28 @@ def conv_dl_fs(x, A, h, la):
     loss = conv_dl_loss(x,A,h) + la*l1(h,[1,2])
     return {"loss":loss}
 
+if __name__ == "__main__":
+    images, labels = load_mnist()
+    psize = 6 
+    X = (get_all_patches_as_matrix(arr, psize, lambda x:x)[0:2000] - 177.5)/177.5
+    param = { 'K' : 100, # learns a dictionary with 100 elements
+          'lambda1' : 0.15, 'numThreads' : 4, 'batchsize' : 400,
+          'iter' : 1000}
+
+    ########## FIRST EXPERIMENT ###########
+    tic = time.time()
+    D = spams.trainDL(np.transpose(X),**param)
+    tac = time.time()
+    t = tac - tic
+    print('time of computation for Dictionary Learning: %f' % t)
+
+    A = np.transpose(D)
+    save_dict_as_pics(A, psize, psize, unnorm_f= lambda li:(li - min(li))/((max(li)-min(li)))*255):
+
+
+    ##param['approx'] = 0
+    # save dictionnary as dict.png
+    # _objective(X,D,param,'dict')
 
   
 

@@ -13,8 +13,20 @@ import math
 
 from nets import *
 from random import * 
-from dl_convergence import *
 
+placeholder_dict = {}
+
+"""
+s = 10
+m = 1000 # hidden vector
+n = 500 # observed vector
+q = s/m
+"""
+
+s = 3
+m = 50 # hidden vector
+n = 25 # observed vector
+q = s/m
 
 """ Norms """
 #x :: R^{batch * size}

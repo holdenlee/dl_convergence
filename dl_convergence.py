@@ -13,6 +13,7 @@ from utils import *
 
 #from nets import *
 from random import * 
+import pickle
 
 placeholder_dict = {}
 
@@ -25,18 +26,24 @@ def rand_pm1():
     else:
         return 1
 
-def make_data_set(A,size,m,s,f):
+def make_data_set(A,size,m,s,f,setting="h"):
     n = np.shape(A)[1]
     hs = np.zeros((size,m))
     for i in range(size):
-        coords = sample_without_replacement(n,s)
+        coords = sample_without_replacement(m,s)
         for j in coords:
             hs[i,j] = f()
-    return np.dot(hs,A).astype(np.float32)
+    hs = hs.astype(np.float32)
+    if setting == "h":
+        return (hs, np.dot(hs,A))
+    else if setting == "y":
+        return (np.dot(hs,A), np.dot(np.dot(hs,A),np.ones(1,n)))
+    else:
+        return np.dot(hs,A)
 #(np.dot(hs,A).astype(np.float32), hs)
 
-def make_data_set_pm1(A, size,m,s):
-    return make_data_set(A,size,m,s,rand_pm1)
+def make_data_set_pm1(A, size,m,s,include_h=False):
+    return make_data_set(A,size,m,s,rand_pm1, include_h)
 
 def get_batch(A,m,s, num_examples):
     return make_data_set_pm1(A,num_examples,m,s)
@@ -78,7 +85,9 @@ def train_dl(A, B, m, s,batch_size, steps, eta, th, eval_steps):
     for i in range(1,steps+1):
         xs = get_batch(A, m, s, batch_size)
         B = am_step(xs, B, eta, th, 1 if i % eval_steps == 0 else 0)
-        #print(B[0])
+        if np.isnan(B).any():
+            loss = float('nan')
+            break
         if i % eval_steps == 0:
             xs = get_batch(A, m, s, batch_size)
             loss = eval_step(xs, B, th)
@@ -93,6 +102,7 @@ def make_A(m,n,verbosity=1):
     printv(np.dot(A,np.transpose(A)), verbosity, 2)
     return A
 
+"""
 def am_dl(verbosity=1):
     f = open('am_dl_3_50_25.txt', 'w')
     s = 3
@@ -118,6 +128,7 @@ def am_dl(verbosity=1):
                       (make_data_set_pm1(A,2*m,m,s), "oversamples")]:
         train_dl_and_eval(A, m, s, batch_size, max_steps, eval_steps, eta, f, init, st, th=0.5, verbosity=verbosity)
     f.close()
+"""
 
 def train_dl_and_eval(A, m, s, batch_size, max_steps, eval_steps, eta, f=None, init=None, st="", th=0.5, verbosity=1):
     #for alpha in alpha_list:
@@ -187,13 +198,13 @@ def am_dls(verbosity=1):
     max_steps = 2000
     eval_steps = 100      
     th = 0.5
-    eta = 1 # 0.1 * m/s
+    eta = 0.1 # 0.1 * m/s
     data = []
     batch_size = 256 # \Om(m * s)
     f = open('am_dls.txt', 'w')
     for m in [50*2**k for k in range(5)]:
         n = m/2
-        for s in [2**k for k in range(int(math.ceil(math.log(m,2)))+1)]:
+        for s in [2**k for k in range(int(math.ceil(math.log(m,2)/2))+1)]:
             q = s/m
             printv((s,m,n,q),verbosity,1)
             A = make_A(m,n,verbosity)
@@ -202,13 +213,21 @@ def am_dls(verbosity=1):
                       (init_close(A, 0.2), "0.2"),
                       (init_close(A, 0.5), "0.5"),
                       (1/math.sqrt(n)*np.random.randn(m,n).astype(np.float32), "random"), 
+                      (1/math.sqrt(n)*np.random.randn(2*m,n).astype(np.float32), "overrandom"), 
                       (make_data_set_pm1(A,m,m,s), "samples"),
                       (make_data_set_pm1(A,2*m,m,s), "oversamples")]:
-                (loss, B, Bn, mins1, mins2, mins3, AB) = \
-                    train_dl_and_eval(A, m, s, batch_size, max_steps, eval_steps, eta, f, init, st, 
-                                      th=0.5, verbosity=verbosity)
-                data.append((m,n,s, loss, mins1, mins2, mins3, AB))
+                loss = None
+                eta=0.1
+                while np.isnan(loss):
+                    (loss, B, Bn, mins1, mins2, mins3, AB) = \
+                                                             train_dl_and_eval(A, m, s, batch_size, max_steps, eval_steps, eta, f, init, st, 
+                                                                               th=0.5, verbosity=verbosity)
+                    eta = eta/10
+                data.append((m,n,s, st, loss, mins1, mins2, mins3, A, B, AB))
     f.close()
+    with open('am_dls_data.pickle', 'wb') as f:
+    # Pickle the 'data' dictionary using the highest protocol available.
+        pickle.dump(data, f, pickle.HIGHEST_PROTOCOL)
 
 if __name__=="__main__":
     np.set_printoptions(threshold=np.inf,precision=2)
