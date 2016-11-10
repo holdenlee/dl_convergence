@@ -17,6 +17,7 @@ from utils import *
 from nets import *
 from nndl import *
 
+
 placeholder_dict = {}
 
 """
@@ -258,7 +259,7 @@ def train_nn_dl(A, B, m, n,s,batch_size, max_steps, eta, th, eval_steps):
         with tf.Graph().as_default():
             with tf.variable_scope("def"):
                 #, shape=(m,n) #do this for tensorflow 7 not 11.
-                A0 = variable_on_cpu("A", initializer=B, dtype=tf.float32)
+                A0 = variable_on_cpu("A", initializer=B.astype(np.float32), dtype=tf.float32)
                 # x = tf.constant(xs)
                 funcs = nndl_fs(A0, n, batch_size)
             sess = None
@@ -311,4 +312,27 @@ def test_nndl(verbosity=1):
     return data
 
 
-
+"""
+max_steps = 2000
+eval_steps = 100      
+th = 0.5
+eta = 0.1 # 0.1 * m/s
+data = []
+batch_size = 256 # \Om(m * s)
+f = None #open('am_dls.txt', 'w')
+m=50
+n=25
+s=4
+q=s/m
+printv((s,m,n,q),verbosity,1)
+A = make_A(m,n,verbosity)
+(init, st) = (init_close(A, 0), "0.00")
+#loss = np.nan
+printv(st, verbosity, 1)
+#while np.isnan(loss):
+(B, loss) = train_nn_dl(A, np.transpose(init), m, n,s, batch_size, max_steps, eta, th, eval_steps)
+(loss, B, Bn, mins1, mins2, mins3, AB) = evals(A, B, loss, f, verbosity)
+#eta = eta/10
+data.append((m,n,s, st, loss, mins1, mins2, mins3, A, B, AB))
+return data
+"""

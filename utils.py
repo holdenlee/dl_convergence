@@ -1,5 +1,6 @@
 from random import *
 import math
+import itertools
 
 """
 List functions
