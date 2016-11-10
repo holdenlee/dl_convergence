@@ -65,6 +65,9 @@ def percentiles(li, ps):
 def quartiles(li):
     return percentiles(li, [0,.25, .5, .75, 1])
 
+def e_(i,n):
+    return np.asarray([1 if j==i else 0 for j in range(n)])
+
 """
 Loops
 """

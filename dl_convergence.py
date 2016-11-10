@@ -9,11 +9,13 @@ import time
 import numpy as np
 from six.moves import xrange  # pylint: disable=redefined-builtin
 import math
-from utils import *
 
-#from nets import *
 from random import * 
 import pickle
+
+from utils import *
+from nets import *
+from nndl import *
 
 placeholder_dict = {}
 
@@ -26,7 +28,7 @@ def rand_pm1():
     else:
         return 1
 
-def make_data_set(A,size,m,s,f,setting="h"):
+def make_data_set(A,size,m,s,f,setting=""):
     n = np.shape(A)[1]
     hs = np.zeros((size,m))
     for i in range(size):
@@ -36,14 +38,15 @@ def make_data_set(A,size,m,s,f,setting="h"):
     hs = hs.astype(np.float32)
     if setting == "h":
         return (hs, np.dot(hs,A))
-    else if setting == "y":
-        return (np.dot(hs,A), np.dot(np.dot(hs,A),np.ones(1,n)))
+    elif setting == "y":
+        #print(np.shape(np.dot(np.dot(hs,A),np.ones(n))))
+        return (np.dot(hs,A), np.dot(np.dot(hs,A),np.ones(n)))
     else:
         return np.dot(hs,A)
 #(np.dot(hs,A).astype(np.float32), hs)
 
-def make_data_set_pm1(A, size,m,s,include_h=False):
-    return make_data_set(A,size,m,s,rand_pm1, include_h)
+def make_data_set_pm1(A, size,m,s,setting=""):
+    return make_data_set(A,size,m,s,rand_pm1, setting)
 
 def get_batch(A,m,s, num_examples):
     return make_data_set_pm1(A,num_examples,m,s)
@@ -75,6 +78,9 @@ def eval_step(xs, A, th, verbosity=1):
     hs = [[x if x>th or x<-th else 0 for x in li] for li in np.dot(xs,np.transpose(A))]
 #map(lambda x: x if x>th or x<-th else 0, np.dot(xs,np.transpose(A)))
     diff = xs - np.dot(hs, A)
+    print("eval")
+    print(xs)
+    print(diff)
     loss = np.mean(np.sum(np.square(diff), 1))
     printv("Eval loss: %f" % loss, verbosity, 1)
     return loss
@@ -130,18 +136,7 @@ def am_dl(verbosity=1):
     f.close()
 """
 
-def train_dl_and_eval(A, m, s, batch_size, max_steps, eval_steps, eta, f=None, init=None, st="", th=0.5, verbosity=1):
-    #for alpha in alpha_list:
-
-#    printv((batch_size, max_steps, eta, st), verbosity,1)
-#    f.write(str((batch_size, max_steps, eta, st)))
-    printv(st, verbosity, 1)
-    if f!=None:
-        f.write(st)
-        f.write("\n")
-
-    A0 = init
-    (B, loss) = train_dl(A, A0, m, s, batch_size, max_steps, eta, th, eval_steps)
+def evals(A, B, loss, f, verbosity=1):
     printv("A:", verbosity, 2)
     printv(A, verbosity, 2)
     printv("B:", verbosity, 2)
@@ -182,7 +177,15 @@ def train_dl_and_eval(A, m, s, batch_size, max_steps, eval_steps, eta, f=None, i
     printv("AB^T", verbosity, 2)
     printv(AB, verbosity, 2)
     return (loss, B, Bn, mins1, mins2, mins3, AB)
-    
+
+def train_dl_and_eval(A, m, s, batch_size, max_steps, eval_steps, eta, f=None, init=None, st="", th=0.5, verbosity=1):
+    #for alpha in alpha_list:
+
+#    printv((batch_size, max_steps, eta, st), verbosity,1)
+#    f.write(str((batch_size, max_steps, eta, st)))
+    (B, loss) = train_dl(A, init, m, s, batch_size, max_steps, eta, th, eval_steps)
+    return evals(A, B, loss, f, verbosity)    
+
 """
 Is learned dictionary close to real dictionary?
 """
@@ -216,8 +219,12 @@ def am_dls(verbosity=1):
                       (1/math.sqrt(n)*np.random.randn(2*m,n).astype(np.float32), "overrandom"), 
                       (make_data_set_pm1(A,m,m,s), "samples"),
                       (make_data_set_pm1(A,2*m,m,s), "oversamples")]:
-                loss = None
+                loss = np.nan
                 eta=0.1
+                printv(st, verbosity, 1)
+                if f!=None:
+                    f.write(st)
+                    f.write("\n")
                 while np.isnan(loss):
                     (loss, B, Bn, mins1, mins2, mins3, AB) = \
                                                              train_dl_and_eval(A, m, s, batch_size, max_steps, eval_steps, eta, f, init, st, 
@@ -232,3 +239,76 @@ def am_dls(verbosity=1):
 if __name__=="__main__":
     np.set_printoptions(threshold=np.inf,precision=2)
     am_dls(verbosity=2)
+
+def refresh_f(A,m,s,bf,setting=""):
+    #(xs, ys) 
+    if setting == "y":
+        (xs,ys) = make_data_set_pm1(A,bf.num_examples,m,s,"y")
+        bf.xs = xs
+        bf.ys = ys
+    else:
+        xs = make_data_set_pm1(A,bf.num_examples,m,s)
+        bf.xs = xs
+
+def train_nn_dl(A, B, m, n,s,batch_size, max_steps, eta, th, eval_steps):
+    train_dir = "data/"
+    train_data = make_batch_feeder_with_refresh(None, None, lambda bf: refresh_f(A, m,s,bf, "y"), batch_size)
+    test_data = make_batch_feeder_with_refresh(None, None, lambda bf: refresh_f(A, m,s,bf ,"y"), batch_size)
+    while True:
+        with tf.Graph().as_default():
+            with tf.variable_scope("def"):
+                #, shape=(m,n) #do this for tensorflow 7 not 11.
+                A0 = variable_on_cpu("A", initializer=B, dtype=tf.float32)
+                # x = tf.constant(xs)
+                funcs = nndl_fs(A0, n, batch_size)
+            sess = None
+            step = lambda fs, global_step: (
+                train_step(fs["loss"], [], global_step,
+                              lambda gs: tf.train.GradientDescentOptimizer(eta)))
+            sess=train2(funcs, 
+                    step, 
+                    max_steps=max_steps, 
+                    eval_steps=0, #no evaluation
+                    train_dir=train_dir,
+                    batch_size=batch_size, #no batches
+                    train_data=train_data,
+                    test_data=test_data,
+                    x_pl="def/x:0",
+                    y_pl="def/y:0")
+            if sess==None:
+                eta = eta/10
+                print(eta)
+                continue
+            B = tf.get_default_graph().get_tensor_by_name("def/A:0").eval(session=sess)
+            B = np.transpose(B)
+            break
+    xs = get_batch(A, m, s, batch_size)
+    loss = eval_step(xs, B, th)
+    return (B, loss)
+
+def test_nndl(verbosity=1):
+    max_steps = 2000
+    eval_steps = 100      
+    th = 0.5
+    eta = 0.1 # 0.1 * m/s
+    data = []
+    batch_size = 256 # \Om(m * s)
+    f = None #open('am_dls.txt', 'w')
+    m=50
+    n=25
+    s=4
+    q=s/m
+    printv((s,m,n,q),verbosity,1)
+    A = make_A(m,n,verbosity)
+    (init, st) = (init_close(A, 0), "0.00")
+    #loss = np.nan
+    printv(st, verbosity, 1)
+    #while np.isnan(loss):
+    (B, loss) = train_nn_dl(A, np.transpose(init), m, n,s, batch_size, max_steps, eta, th, eval_steps)
+    (loss, B, Bn, mins1, mins2, mins3, AB) = evals(A, B, loss, f, verbosity)
+    #eta = eta/10
+    data.append((m,n,s, st, loss, mins1, mins2, mins3, A, B, AB))
+    return data
+
+
+

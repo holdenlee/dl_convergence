@@ -300,7 +300,9 @@ def train2(funcs, step_f, output_steps=10, summary_steps=100, save_steps=1000, e
       _, loss_value = sess.run([train_op, loss], feed_dict=feed_dict)
       duration = time.time() - start_time
 
-      assert not np.isnan(loss_value), 'Model diverged with loss = NaN'
+      if np.isnan(loss_value):
+          print('Model diverged with loss = NaN')
+          return None
       if valid_pos_int(output_steps) and step % output_steps == 0:
          output_info(batch_size, step, loss_value, duration)
       if valid_pos_int(summary_steps) and step % summary_steps == 0:
@@ -640,7 +642,7 @@ def am_train_step(total_loss, losses, global_step, optimizer, c1, c2,
     with tf.control_dependencies([loss_averages_op]):
         #must compute loss_averages_op before executing this---Why?
         opt = optimizer(global_step)
-        grads = opt.compute_gradients(total_loss, c1 if global_step % 2 == 0 else c2)
+        grads = opt.compute_gradients(total_loss, var_list = c1 if global_step % 2 == 0 else c2)
 
     # Apply gradients.
     apply_gradient_op = opt.apply_gradients(grads, global_step=global_step)
